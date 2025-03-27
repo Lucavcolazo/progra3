@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+  <title>ColorPicker</title>
+</head>
+
+<body>
+  <div class="contenedor-sombra">
+    <div class="contenedor">
+      <h1>Elegi tu color!</h1>
+
+      <div class="color-preview" id="colorPreview"></div>
+      <p id="hexValue">#000000</p>
+
+      <div class="slider-container">
+        <label for="red">R</label>
+        <input type="range" id="red" min="0" max="255" value="0">
+        <span id="redValue">0</span>
+      </div>
+
+      <div class="slider-container">
+        <label for="green">G</label>
+        <input type="range" id="green" min="0" max="255" value="0">
+        <span id="greenValue">0</span>
+      </div>
+
+      <div class="slider-container">
+        <label for="blue">B</label>
+        <input type="range" id="blue" min="0" max="255" value="0">
+        <span id="blueValue">0</span>
+      </div>
+
+      <button id="resetBtn">Restablecer</button>
+
+      <h3>Preset Colors</h3>
+      <div class="preset-container">
+        <button class="preset" data-color="#ff0000" style="background-color:#ff0000">Red</button>
+        <button class="preset" data-color="#00ff00" style="background-color:#00ff00">Green</button>
+        <button class="preset" data-color="#0000ff" style="background-color:#0000ff">Blue</button>
+        <button class="preset" data-color="#ffff00" style="background-color:#ffff00">Yellow</button>
+        <button class="preset" data-color="#ffa500" style="background-color:#ffa500">Orange</button>
+        <button class="preset" data-color="#800080" style="background-color:#800080">Purple</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
