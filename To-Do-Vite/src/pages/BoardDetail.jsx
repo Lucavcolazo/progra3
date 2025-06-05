@@ -39,8 +39,8 @@ const BoardDetail = () => {
     
     try {
       setLoading(true);
-      const data = await fetchTasks(boardName, boardCategory, currentPage);
-      setTasksData(data);
+      const data = await fetchTasks(boardName, boardCategory);
+      setTasksData({ tasks: data, total: data.length, page: 1, totalPages: 1 });
       setError(null);
     } catch (err) {
       setError('Error al cargar las tareas');
@@ -153,12 +153,6 @@ const BoardDetail = () => {
     }
   };
 
-  const filteredTasks = tasksData.tasks.filter(task => {
-    if (filter === 'active') return !task.completed;
-    if (filter === 'completed') return task.completed;
-    return true;
-  });
-
   if (loading) {
     return (
       <PageLayout title={`Tablero: ${boardName}`}>
@@ -166,6 +160,12 @@ const BoardDetail = () => {
       </PageLayout>
     );
   }
+
+  const filteredTasks = tasksData?.tasks?.filter(task => {
+    if (filter === 'active') return !task.completed;
+    if (filter === 'completed') return task.completed;
+    return true;
+  }) || [];
 
   return (
     <PageLayout title={`Tablero: ${boardName}`}>
@@ -226,7 +226,7 @@ const BoardDetail = () => {
             Completadas
           </button>
         </div>
-        {tasksData.tasks.some(t => t.completed) && (
+        {tasksData?.tasks?.some(t => t.completed) && (
           <button
             onClick={handleClearCompleted}
             className="text-red-400 hover:text-red-300 transition-colors"
