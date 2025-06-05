@@ -1,0 +1,46 @@
+{
+  "boards": [
+    {
+      "name": "Pruebas 1",
+      "category": "Universidad",
+      "tasks": [
+        {
+          "id": 1749105798940,
+          "text": "aaa",
+          "completed": false
+        },
+        {
+          "id": 1749105805226,
+          "text": "aaaaa",
+          "completed": false
+        },
+        {
+          "id": 1749105807203,
+          "text": "aaaaa",
+          "completed": true
+        }
+      ]
+    },
+    {
+      "name": "Test 1",
+      "category": "Personal",
+      "tasks": [
+        {
+          "id": 1749105817049,
+          "text": "dssssddd",
+          "completed": true
+        },
+        {
+          "id": 1749105818956,
+          "text": "dadadad",
+          "completed": false
+        },
+        {
+          "id": 1749105821485,
+          "text": "dasdadadqqqqq",
+          "completed": false
+        }
+      ]
+    }
+  ]
+}
