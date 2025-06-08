@@ -1,42 +1,21 @@
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs').promises;
-const path = require('path');
+const pool = require('./config/db');
 
 const app = express();
 const port = 3000;
-const boardsFile = path.join(__dirname, 'boards.json');
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Función para leer los tableros
-async function readBoards() {
-    try {
-        const data = await fs.readFile(boardsFile, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        // Si el archivo no existe, crear uno con datos iniciales
-        const initialData = {
-            boards: []
-        };
-        await fs.writeFile(boardsFile, JSON.stringify(initialData, null, 2));
-        return initialData;
-    }
-}
-
-// Función para escribir los tableros
-async function writeBoards(data) {
-    await fs.writeFile(boardsFile, JSON.stringify(data, null, 2));
-}
-
 // Obtener todos los tableros
 app.get('/boards', async (req, res) => {
     try {
-        const data = await readBoards();
-        res.json(data.boards);
+        const result = await pool.query('SELECT * FROM boards ORDER BY created_at DESC');
+        res.json(result.rows);
     } catch (error) {
+        console.error('Error al obtener tableros:', error);
         res.status(500).json({ error: 'Error al leer los tableros' });
     }
 });
@@ -53,17 +32,13 @@ app.post('/boards', async (req, res) => {
             return res.status(400).json({ error: 'La categoría debe ser Personal o Universidad' });
         }
 
-        const data = await readBoards();
-        const newBoard = {
-            name,
-            category,
-            tasks: []
-        };
-
-        data.boards.push(newBoard);
-        await writeBoards(data);
-        res.status(201).json(newBoard);
+        const result = await pool.query(
+            'INSERT INTO boards (name, category) VALUES ($1, $2) RETURNING *',
+            [name, category]
+        );
+        res.status(201).json(result.rows[0]);
     } catch (error) {
+        console.error('Error al crear tablero:', error);
         res.status(500).json({ error: 'Error al crear el tablero' });
     }
 });
@@ -72,18 +47,18 @@ app.post('/boards', async (req, res) => {
 app.delete('/boards/:name', async (req, res) => {
     try {
         const { name } = req.params;
-        const data = await readBoards();
-        // Buscar el índice ignorando espacios y mayúsculas/minúsculas
-        const boardIndex = data.boards.findIndex(board => board.name.trim().toLowerCase() === name.trim().toLowerCase());
+        const result = await pool.query(
+            'DELETE FROM boards WHERE name = $1 RETURNING *',
+            [name]
+        );
         
-        if (boardIndex === -1) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Tablero no encontrado' });
         }
 
-        data.boards.splice(boardIndex, 1);
-        await writeBoards(data);
         res.status(204).send();
     } catch (error) {
+        console.error('Error al eliminar tablero:', error);
         res.status(500).json({ error: 'Error al eliminar el tablero' });
     }
 });
@@ -92,16 +67,13 @@ app.delete('/boards/:name', async (req, res) => {
 app.get('/boards/:name/tasks', async (req, res) => {
     try {
         const { name } = req.params;
-        const { category } = req.query;
-        const data = await readBoards();
-        const board = data.boards.find(board => board.name === name && board.category === category);
-        
-        if (!board) {
-            return res.status(404).json({ error: 'Tablero no encontrado' });
-        }
-
-        res.json(board.tasks);
+        const result = await pool.query(
+            'SELECT t.* FROM tasks t JOIN boards b ON t.board_id = b.id WHERE b.name = $1 ORDER BY t.created_at DESC',
+            [name]
+        );
+        res.json(result.rows);
     } catch (error) {
+        console.error('Error al obtener tareas:', error);
         res.status(500).json({ error: 'Error al leer las tareas' });
     }
 });
@@ -116,23 +88,21 @@ app.post('/boards/:name/tasks', async (req, res) => {
             return res.status(400).json({ error: 'El texto es requerido' });
         }
 
-        const data = await readBoards();
-        const boardIndex = data.boards.findIndex(board => board.name === name);
-        
-        if (boardIndex === -1) {
+        // Primero obtenemos el ID del tablero
+        const boardResult = await pool.query('SELECT id FROM boards WHERE name = $1', [name]);
+        if (boardResult.rows.length === 0) {
             return res.status(404).json({ error: 'Tablero no encontrado' });
         }
 
-        const newTask = {
-            id: Date.now(),
-            text,
-            completed: false
-        };
+        const boardId = boardResult.rows[0].id;
+        const taskResult = await pool.query(
+            'INSERT INTO tasks (board_id, text) VALUES ($1, $2) RETURNING *',
+            [boardId, text]
+        );
 
-        data.boards[boardIndex].tasks.push(newTask);
-        await writeBoards(data);
-        res.status(201).json(newTask);
+        res.status(201).json(taskResult.rows[0]);
     } catch (error) {
+        console.error('Error al crear tarea:', error);
         res.status(500).json({ error: 'Error al crear la tarea' });
     }
 });
@@ -143,29 +113,45 @@ app.patch('/boards/:name/tasks/:taskId', async (req, res) => {
         const { name, taskId } = req.params;
         const { completed, text } = req.body;
         
-        const data = await readBoards();
-        const boardIndex = data.boards.findIndex(board => board.name === name);
-        
-        if (boardIndex === -1) {
+        // Primero obtenemos el ID del tablero
+        const boardResult = await pool.query('SELECT id FROM boards WHERE name = $1', [name]);
+        if (boardResult.rows.length === 0) {
             return res.status(404).json({ error: 'Tablero no encontrado' });
         }
 
-        const taskIndex = data.boards[boardIndex].tasks.findIndex(task => task.id === parseInt(taskId));
+        const boardId = boardResult.rows[0].id;
+        let updateQuery = 'UPDATE tasks SET ';
+        const queryParams = [];
+        let paramCount = 1;
+
+        if (completed !== undefined) {
+            updateQuery += `completed = $${paramCount}, `;
+            queryParams.push(completed);
+            paramCount++;
+        }
+
+        if (text !== undefined) {
+            updateQuery += `text = $${paramCount}, `;
+            queryParams.push(text);
+            paramCount++;
+        }
+
+        // Remover la última coma y espacio
+        updateQuery = updateQuery.slice(0, -2);
         
-        if (taskIndex === -1) {
+        // Agregar la condición WHERE
+        updateQuery += ` WHERE id = $${paramCount} AND board_id = $${paramCount + 1} RETURNING *`;
+        queryParams.push(parseInt(taskId), boardId);
+
+        const result = await pool.query(updateQuery, queryParams);
+        
+        if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Tarea no encontrada' });
         }
 
-        const updatedTask = {
-            ...data.boards[boardIndex].tasks[taskIndex],
-            ...(completed !== undefined && { completed }),
-            ...(text !== undefined && { text })
-        };
-
-        data.boards[boardIndex].tasks[taskIndex] = updatedTask;
-        await writeBoards(data);
-        res.json(updatedTask);
+        res.json(result.rows[0]);
     } catch (error) {
+        console.error('Error al actualizar tarea:', error);
         res.status(500).json({ error: 'Error al actualizar la tarea' });
     }
 });
@@ -174,20 +160,26 @@ app.patch('/boards/:name/tasks/:taskId', async (req, res) => {
 app.delete('/boards/:name/tasks/:taskId', async (req, res) => {
     try {
         const { name, taskId } = req.params;
-        const data = await readBoards();
-        const boardIndex = data.boards.findIndex(board => board.name === name);
         
-        if (boardIndex === -1) {
+        // Primero obtenemos el ID del tablero
+        const boardResult = await pool.query('SELECT id FROM boards WHERE name = $1', [name]);
+        if (boardResult.rows.length === 0) {
             return res.status(404).json({ error: 'Tablero no encontrado' });
         }
 
-        data.boards[boardIndex].tasks = data.boards[boardIndex].tasks.filter(
-            task => task.id !== parseInt(taskId)
+        const boardId = boardResult.rows[0].id;
+        const result = await pool.query(
+            'DELETE FROM tasks WHERE id = $1 AND board_id = $2 RETURNING *',
+            [parseInt(taskId), boardId]
         );
 
-        await writeBoards(data);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Tarea no encontrada' });
+        }
+
         res.status(204).send();
     } catch (error) {
+        console.error('Error al eliminar tarea:', error);
         res.status(500).json({ error: 'Error al eliminar la tarea' });
     }
 });
@@ -196,15 +188,22 @@ app.delete('/boards/:name/tasks/:taskId', async (req, res) => {
 app.delete('/boards/:name/tasks/completed', async (req, res) => {
     try {
         const { name } = req.params;
-        const data = await readBoards();
-        const boardIndex = data.boards.findIndex(board => board.name.trim().toLowerCase() === name.trim().toLowerCase());
-        if (boardIndex === -1) {
+        
+        // Primero obtenemos el ID del tablero
+        const boardResult = await pool.query('SELECT id FROM boards WHERE name = $1', [name]);
+        if (boardResult.rows.length === 0) {
             return res.status(404).json({ error: 'Tablero no encontrado' });
         }
-        data.boards[boardIndex].tasks = data.boards[boardIndex].tasks.filter(task => !task.completed);
-        await writeBoards(data);
+
+        const boardId = boardResult.rows[0].id;
+        await pool.query(
+            'DELETE FROM tasks WHERE board_id = $1 AND completed = true',
+            [boardId]
+        );
+
         res.status(204).send();
     } catch (error) {
+        console.error('Error al eliminar tareas completadas:', error);
         res.status(500).json({ error: 'Error al eliminar tareas completadas' });
     }
 });
