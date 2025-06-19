@@ -1,6 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const pool = require('./config/db');
+const authRoutes = require('./routes/auth');
+const cookieParser = require('cookie-parser');
+const authMiddleware = require('./middleware/auth');
+
 
 const app = express();
 const port = 3000;
@@ -8,6 +12,12 @@ const port = 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
+app.use('/auth', authRoutes); // ruta publica 
+app.use('/boards', authMiddleware); // ruta privada
+app.use('/boards/:name/tasks', authMiddleware); // ruta privada
+
+
 
 // Obtener todos los tableros
 app.get('/boards', async (req, res) => {
@@ -21,7 +31,7 @@ app.get('/boards', async (req, res) => {
 });
 
 // Crear un nuevo tablero
-app.post('/boards', async (req, res) => {
+app.post('/boards', authMiddleware, async (req, res) => {
     try {
         const { name, category } = req.body;
         if (!name || !category) {
@@ -44,7 +54,7 @@ app.post('/boards', async (req, res) => {
 });
 
 // Eliminar un tablero
-app.delete('/boards/:name', async (req, res) => {
+app.delete('/boards/:name', authMiddleware, async (req, res) => {
     try {
         const { name } = req.params;
         const result = await pool.query(
@@ -79,7 +89,7 @@ app.get('/boards/:name/tasks', async (req, res) => {
 });
 
 // Agregar una tarea a un tablero
-app.post('/boards/:name/tasks', async (req, res) => {
+app.post('/boards/:name/tasks', authMiddleware, async (req, res) => {
     try {
         const { name } = req.params;
         const { text } = req.body;
@@ -157,7 +167,7 @@ app.patch('/boards/:name/tasks/:taskId', async (req, res) => {
 });
 
 // Eliminar una tarea
-app.delete('/boards/:name/tasks/:taskId', async (req, res) => {
+app.delete('/boards/:name/tasks/:taskId', authMiddleware, async (req, res) => {
     try {
         const { name, taskId } = req.params;
         
@@ -185,7 +195,7 @@ app.delete('/boards/:name/tasks/:taskId', async (req, res) => {
 });
 
 // Eliminar todas las tareas completadas de un tablero
-app.delete('/boards/:name/tasks/completed', async (req, res) => {
+app.delete('/boards/:name/tasks/completed', authMiddleware, async (req, res) => {
     try {
         const { name } = req.params;
         
@@ -207,6 +217,8 @@ app.delete('/boards/:name/tasks/completed', async (req, res) => {
         res.status(500).json({ error: 'Error al eliminar tareas completadas' });
     }
 });
+
+app.use('/auth', authRoutes);
 
 app.listen(port, () => {
     console.log(`Servidor corriendo en http://localhost:${port}`);
