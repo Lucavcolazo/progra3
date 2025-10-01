@@ -1,205 +1,109 @@
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { CONTRACT_ADDRESS } from '../utils/constants';
+import { useAccount } from 'wagmi';
 import type { UserData, ContractData } from '../types/contract';
-import { sepolia } from 'viem/chains';
+import { getFaucetStatus, postFaucetClaim } from '../services/api';
+import { useEffect, useMemo, useState } from 'react';
 
-// ABI del contrato FaucetToken (simplificado para las funciones que necesitamos)
-const FAUCET_TOKEN_ABI = [
-  {
-    "inputs": [],
-    "name": "claimTokens",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
-    "name": "balanceOf",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
-    "name": "hasAddressClaimed",
-    "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getFaucetUsers",
-    "outputs": [{"internalType": "address[]", "name": "", "type": "address[]"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "getFaucetAmount",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "pure",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "name",
-    "outputs": [{"internalType": "string", "name": "", "type": "string"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "symbol",
-    "outputs": [{"internalType": "string", "name": "", "type": "string"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "decimals",
-    "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "totalSupply",
-    "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "owner",
-    "outputs": [{"internalType": "address", "name": "", "type": "address"}],
-    "stateMutability": "view",
-    "type": "function"
-  }
-] as const;
+// Ahora el frontend no toca el contrato. Usa el backend.
 
 export function useFaucet() {
   const { address, isConnected } = useAccount();
-  const { writeContract, data: hash, isPending, error } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({
-    hash,
-  });
+  const [userData, setUserData] = useState<UserData | null>(null);
+  const [contractData, setContractData] = useState<ContractData | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
 
-  // Leer datos del contrato
-  const { data: contractName } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'name',
-  });
+  const token = useMemo(() => (typeof window !== 'undefined' ? localStorage.getItem('jwt') : null), [isConnected, typeof window !== 'undefined' ? localStorage.getItem('jwt') : null]);
 
-  const { data: contractSymbol } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'symbol',
-  });
+  useEffect(() => {
+    let ignore = false;
+    async function load() {
+      if (!address || !token) return;
+      try {
+        const data = await getFaucetStatus(address, token);
+        if (ignore) return;
+        setUserData({
+          address,
+          balance: BigInt(data.balance),
+          hasClaimed: data.hasClaimed,
+          isOwner: data.contract.owner.toLowerCase() === address.toLowerCase(),
+        });
+        setContractData({
+          name: data.contract.name,
+          symbol: data.contract.symbol,
+          decimals: 18,
+          totalSupply: BigInt(data.contract.totalSupply),
+          faucetAmount: BigInt(data.contract.faucetAmount),
+          faucetUsers: data.users as any,
+          owner: data.contract.owner as any,
+        });
+      } catch (e: any) {
+        setError(new Error(e?.message || 'Error al cargar estado'));
+      }
+    }
+    load();
+    return () => { ignore = true; };
+  }, [address, token]);
 
-  const { data: contractDecimals } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'decimals',
-  });
-
-  const { data: totalSupply } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'totalSupply',
-  });
-
-  const { data: faucetAmount } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'getFaucetAmount',
-  });
-
-  const { data: faucetUsers } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'getFaucetUsers',
-  });
-
-  const { data: contractOwner } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'owner',
-  });
-
-  // Leer datos del usuario (solo si está conectado)
-  const { data: userBalance } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'balanceOf',
-    args: address ? [address] : undefined,
-    query: {
-      enabled: !!address,
-    },
-  });
-
-  const { data: hasUserClaimed } = useReadContract({
-    address: CONTRACT_ADDRESS,
-    abi: FAUCET_TOKEN_ABI,
-    functionName: 'hasAddressClaimed',
-    args: address ? [address] : undefined,
-    query: {
-      enabled: !!address,
-    },
-  });
-
-  // Función para reclamar tokens
   const claimTokens = async () => {
     if (!isConnected) {
-      throw new Error('Wallet no conectada');
+      setError(new Error('🔗 Conecta tu wallet para continuar'));
+      return;
     }
-
-    writeContract({
-      address: CONTRACT_ADDRESS,
-      abi: FAUCET_TOKEN_ABI,
-      functionName: 'claimTokens',
-      chainId: sepolia.id,
-    });
-  };
-
-  // Preparar datos del usuario
-  const userData: UserData | null = address ? {
-    address,
-    balance: userBalance || 0n,
-    hasClaimed: hasUserClaimed || false,
-    isOwner: contractOwner === address,
-  } : null;
-
-  // Preparar datos del contrato
-  const contractData: ContractData | null = {
-    name: contractName || '',
-    symbol: contractSymbol || '',
-    decimals: contractDecimals || 18,
-    totalSupply: totalSupply || 0n,
-    faucetAmount: faucetAmount || 0n,
-    faucetUsers: faucetUsers || [],
-    owner: contractOwner || '0x0000000000000000000000000000000000000000',
+    if (!token) {
+      setError(new Error('✍️ Debes autenticarte (firmar SIWE) antes de reclamar'));
+      return;
+    }
+    setError(null);
+    setIsPending(true);
+    setIsConfirming(false);
+    setIsConfirmed(false);
+    try {
+      await postFaucetClaim(token);
+      setIsPending(false);
+      setIsConfirming(true);
+      // Espera corta y recarga estado
+      setTimeout(async () => {
+        setIsConfirming(false);
+        setIsConfirmed(true);
+        if (address) {
+          const data = await getFaucetStatus(address, token);
+          setUserData({
+            address,
+            balance: BigInt(data.balance),
+            hasClaimed: data.hasClaimed,
+            isOwner: data.contract.owner.toLowerCase() === address.toLowerCase(),
+          });
+          setContractData({
+            name: data.contract.name,
+            symbol: data.contract.symbol,
+            decimals: 18,
+            totalSupply: BigInt(data.contract.totalSupply),
+            faucetAmount: BigInt(data.contract.faucetAmount),
+            faucetUsers: data.users as any,
+            owner: data.contract.owner as any,
+          });
+        }
+      }, 2000);
+    } catch (e: any) {
+      setIsPending(false);
+      setIsConfirming(false);
+      setIsConfirmed(false);
+      setError(new Error(e?.message || 'Error al reclamar'));
+    }
   };
 
   return {
-    // Estado de conexión
     isConnected,
     address,
-    
-    // Datos del usuario
     userData,
-    
-    // Datos del contrato
     contractData,
-    
-    // Funciones
     claimTokens,
-    
-    // Estados de transacciones
     isPending,
     isConfirming,
     isConfirmed,
     error,
-    hash,
+    hash: undefined,
   };
 }

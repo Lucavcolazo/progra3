@@ -1,16 +1,32 @@
 import { useAccount, useDisconnect } from 'wagmi';
+import { postAuthMessage, postSignin } from '../services/api';
 
 export function WalletButton() {
   const { isConnected, address } = useAccount();
   const { disconnect } = useDisconnect();
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (isConnected) {
       disconnect();
+      localStorage.removeItem('jwt');
     } else {
       // Abrir MetaMask directamente
       if (typeof window.ethereum !== 'undefined') {
-        window.ethereum.request({ method: 'eth_requestAccounts' });
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[];
+        const selected = (accounts && accounts[0]) ? accounts[0] : address;
+        if (!selected) {
+          alert('No se pudo obtener la dirección de la wallet');
+          return;
+        }
+        // Flujo SIWE con la dirección obtenida del provider
+        const { message } = await postAuthMessage(selected);
+        // @ts-ignore
+        const signature = await window.ethereum.request({
+          method: 'personal_sign',
+          params: [message, selected],
+        });
+        const { token } = await postSignin(message, signature as string);
+        localStorage.setItem('jwt', token);
       } else {
         alert('MetaMask no está instalado. Por favor instálalo desde https://metamask.io');
       }
