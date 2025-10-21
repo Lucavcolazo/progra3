@@ -53,7 +53,47 @@ export async function callOpenRouterStream(messages: { role: string; content: st
     throw new Error(`OpenRouter error ${res.status}: ${txt}`);
   }
 
-  // Devolvemos directamente el stream del proveedor para que Next lo envíe al cliente
-  // Si OpenRouter usa SSE con prefijo "data: ", podrías necesitar parsear y extraer el campo `delta` o `text`.
-  return res.body;
+  // Parsear el stream de OpenRouter y extraer solo el texto
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const jsonStr = line.slice(6); // Remover "data: "
+                if (jsonStr.trim() === '[DONE]') {
+                  controller.close();
+                  return;
+                }
+                
+                const data = JSON.parse(jsonStr);
+                if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
+                  // Enviar solo el contenido del texto
+                  controller.enqueue(new TextEncoder().encode(data.choices[0].delta.content));
+                }
+              } catch (e) {
+                // Ignorar líneas que no son JSON válido
+                continue;
+              }
+            }
+          }
+        }
+        controller.close();
+      } catch (error) {
+        controller.error(error);
+      }
+    }
+  });
+
+  return stream;
 }
